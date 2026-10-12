@@ -1,0 +1,19 @@
+__pycache__/
+*.pyc
+.venv/
+.DS_Store
+
+# 仿真 / 综合产物（ISE、ModelSim、Vivado 等）
+*.wlf
+*.vcd
+xst/
+iseconfig/
+_xmsgs/
+*.bit
+*.ngc
+*.ncd
+*.xise.bak
+work/
+transcript
+
+# results/ 下的 CSV 是实验证据，默认提交
