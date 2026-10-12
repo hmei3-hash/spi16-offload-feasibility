@@ -1,69 +1,73 @@
-# 实验设计：SPI16 offload 可行性
+# Experiment Design: SPI16 Offload Feasibility
 
-目的：用数据判断"主机 + FPGA 通过 SPI 搬数据"是否有意义，再决定继续还是废弃。
-本仓库只提供测量工具和判定框架，**结论由你根据数据下**。
+Purpose: use data to judge whether "host + FPGA moving data over SPI" makes sense, then decide whether to
+continue or drop it. This repository provides the measurement tools and a decision framework;
+**you draw the conclusion from the data.**
 
-## 判定思路
+## Decision approach
 
-对某个被 offload 的任务：
+For a task being offloaded:
 
 ```
-软件版耗时   T_sw
-offload 版   T_off = T_xfer + T_fpga + T_sync
+Software time   T_sw
+Offloaded time  T_off = T_xfer + T_fpga + T_sync
 ```
 
-- `T_xfer`：SPI 传输耗时，由本仓库测得（吞吐、单次事务延迟）。
-- `T_fpga`：FPGA 计算耗时，由 RTL 和时钟决定。
-- `T_sync`：等待就绪、轮询或中断带来的开销。
+- `T_xfer`: SPI transfer time, measured by this repository (throughput, single-transaction latency).
+- `T_fpga`: FPGA compute time, determined by the RTL and clock.
+- `T_sync`: overhead from waiting for ready, polling or interrupts.
 
-只有当 `T_off < T_sw`，或者 offload 能明显释放主机 CPU 时，才值得继续。
+Offloading is worth continuing only if `T_off < T_sw`, or if it frees up a meaningful amount of host CPU.
 
-## 阶段与产出
+## Stages and outputs
 
-| 阶段 | 要做的事 | 需要硬件 | 产出 |
+| Stage | What to do | Hardware needed | Output |
 |---|---|---|---|
-| 0 | 主机代码自测 | 否 | `python -m unittest` 全部通过 |
-| 1 | 主机 SPI 原始性能（MOSI 与 MISO 短接） | 仅 Pi | 吞吐、延迟、CPU 占用、位错误数 |
-| 2 | 回环协议验证（你写的 RTL） | Pi + FPGA | ID 读取、SCRATCH 回环、突发读写、CRC 错误统计 |
-| 3 | 真实链路性能 | Pi + FPGA | 各 SPI 速率下的有效吞吐、延迟、错误率 |
-| 4 | 对比 | 无 | 把 T_xfer 代入你要 offload 的任务，得出结论 |
+| 0 | Self-test the host code | No | `python -m unittest` all pass |
+| 1 | Raw host SPI performance (MOSI jumpered to MISO) | Pi only | Throughput, latency, CPU usage, bit errors |
+| 2 | Loopback protocol check (your RTL) | Pi + FPGA | ID read, SCRATCH loopback, burst read/write, CRC error counts |
+| 3 | Real-link performance | Pi + FPGA | Effective throughput, latency and error rate at each SPI speed |
+| 4 | Comparison | No | Plug T_xfer into the task you want to offload and reach a conclusion |
 
-## 如何运行
+## How to run
 
 ```bash
 cd host
 
-# 阶段 0：不需要任何硬件
+# Stage 0: no hardware required
 python3 -m unittest discover -s tests -v
 python3 bench.py device --sim --iters 200
 
-# 阶段 1：Pi 上，把 MOSI(GPIO10, pin 19) 和 MISO(GPIO9, pin 21) 用杜邦线短接
+# Stage 1: on the Pi, jumper MOSI (GPIO10, pin 19) to MISO (GPIO9, pin 21)
 python3 bench.py raw --bus 0 --dev 0 --speeds 1e6,4e6,8e6,16e6,32e6
 
-# 阶段 2/3：接上 FPGA 后（接线前先核对原理图和电压）
+# Stages 2/3: after connecting the FPGA (check the schematic and voltages before wiring)
 python3 bench.py device --bus 0 --dev 0 --speeds 1e6,4e6,8e6,16e6
 ```
 
-每次运行会把结果追加写入 `results/` 下的 CSV，并在终端打印汇总。
+Each run writes a new timestamped CSV under `results/` and prints a summary to the terminal.
 
-## 判定标准（请你自己填写阈值）
+## Decision criteria (fill in the thresholds yourself)
 
-先在看数据之前填好，避免事后调整标准。
+Fill these in before you look at the data, so the bar is not adjusted after the fact.
 
-| 指标 | 你的通过阈值 | 实测 | 结论 |
+| Metric | Your pass threshold | Measured | Verdict |
 |---|---|---|---|
-| 单寄存器读往返延迟（p99） | ___ µs | | |
-| 64 字突发读有效吞吐 | ___ KB/s | | |
-| 要 offload 的任务所需数据率 | ___ KB/s | | |
-| 链路利用率（需要的 / 可用的） | < ___ % | | |
-| 主机 CPU 占用（传输期间） | < ___ % | | |
-| 长时间运行 CRC/回显错误率 | ___ | | |
-| 软件版任务耗时 T_sw | ___ ms | | |
-| offload 版任务耗时 T_off | ___ ms | | |
+| Single-register read round-trip latency (p99) | ___ µs | | |
+| Effective throughput of a 64-word burst read | ___ KB/s | | |
+| Data rate required by the task to offload | ___ KB/s | | |
+| Link utilization (required / available) | < ___ % | | |
+| Host CPU usage during transfers | < ___ % | | |
+| CRC / echo error rate over a long run | ___ | | |
+| Software task time T_sw | ___ ms | | |
+| Offloaded task time T_off | ___ ms | | |
 
-## 已知局限
+## Known limitations
 
-- Python 层有解释器开销，测得的延迟包含 `spidev` 调用和 CRC 计算，偏悲观。如果结论落在边界上，需要用 C 重测（`ioctl(SPI_IOC_MESSAGE)`）。
-- `spidev` 每次传输默认最多 4096 字节（内核参数 `bufsiz`）。
-- 测试时 Pi 的 CPU 频率策略、温度和其他进程会影响延迟，请记录条件。
-- 软件仿真从机（`spi16/sim.py`）只用来测主机代码，它的"性能"没有任何意义。
+- The Python layer adds interpreter overhead: the measured latency includes `spidev` calls and CRC
+  computation, so it is pessimistic. If the conclusion lands on a boundary, re-measure in C
+  (`ioctl(SPI_IOC_MESSAGE)`).
+- `spidev` limits each transfer to 4096 bytes by default (kernel parameter `bufsiz`).
+- The Pi's CPU frequency policy, temperature and other processes affect latency; record the conditions.
+- The software slave model (`spi16/sim.py`) exists only to test the host code; its "performance" is
+  meaningless.

@@ -1,7 +1,7 @@
-"""软件仿真从机：只用来在没有硬件时测试主机代码。
+"""Software slave model: used only to test the host code when no hardware is available.
 
-它实现 docs/PROTOCOL.md 的行为，但它的"性能"没有任何意义。
-FPGA 的 RTL 和 testbench 需要你自己写。
+It implements the behavior in docs/PROTOCOL.md, but its "performance" is meaningless.
+The FPGA RTL and testbench are yours to write.
 """
 
 import random
@@ -31,7 +31,7 @@ DESIGN_VERSION = 0x0001
 
 class SimSlave:
     def __init__(self, rx_ber: float = 0.0, seed: Optional[int] = 0):
-        """rx_ber: 每个 MISO 字被翻转一个随机比特的概率，用来模拟线上噪声。"""
+        """rx_ber: probability that each MISO word has one random bit flipped, to simulate line noise."""
         self.scratch = 0
         self.errcnt = 0
         self.txncnt = 0
@@ -40,7 +40,7 @@ class SimSlave:
         self.rx_ber = rx_ber
         self._rng = random.Random(seed)
 
-    # --- 寄存器访问 -------------------------------------------------
+    # --- register access ---------------------------------------------
     def _read_reg(self, addr: int) -> Optional[int]:
         if addr == REG_ID:
             return DEVICE_ID
@@ -64,10 +64,10 @@ class SimSlave:
         elif REG_TESTMEM <= addr < REG_TESTMEM + TESTMEM_WORDS:
             self.testmem[addr - REG_TESTMEM] = value
         else:
-            return False  # 只读或未映射
+            return False  # read-only or unmapped
         return True
 
-    # --- 一次 CS 事务 -----------------------------------------------
+    # --- one CS transaction ------------------------------------------
     def xfer(self, tx: Sequence[int]) -> List[int]:
         n = len(tx) - 3
         cmd = tx[0] if tx else 0
@@ -79,7 +79,7 @@ class SimSlave:
         if n < 1 or n != length:
             bad_cmd = True
         elif crc_ok:
-            # 写入只在 CRC 通过之后提交
+            # writes are committed only after the CRC passes
             for i in range(n):
                 a = addr + (i if inc else 0)
                 if write:
@@ -95,7 +95,7 @@ class SimSlave:
         resp = [self._status, cmd & 0xFFFF] + out
         resp.append(crc16_words(resp))
 
-        # 更新"上一次事务"状态和计数
+        # update the "previous transaction" status and the counters
         status = STATUS_IDLE
         if not crc_ok:
             status |= STATUS_CRC_ERR
@@ -105,7 +105,7 @@ class SimSlave:
         self._status = status
         self.txncnt = min(self.txncnt + 1, 0xFFFF)
 
-        # 线路噪声：CRC 之后再翻转，让主机去检出
+        # line noise: flip bits after the CRC is computed so the host has to detect it
         if self.rx_ber > 0:
             for i in range(len(resp)):
                 if self._rng.random() < self.rx_ber:
@@ -114,7 +114,7 @@ class SimSlave:
 
 
 class SimTransport:
-    """把 SimSlave 包装成 Transport。"""
+    """Wrap a SimSlave as a Transport."""
 
     def __init__(self, slave: Optional[SimSlave] = None):
         self.slave = slave or SimSlave()

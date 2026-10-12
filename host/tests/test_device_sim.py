@@ -49,9 +49,9 @@ class TestDeviceSim(unittest.TestCase):
 
     def test_status_is_previous_transaction(self):
         dev, slave = make_dev()
-        dev.read(0x99, 1)                       # 未映射地址：这次事务本身不报错
+        dev.read(0x99, 1)                       # unmapped address: this transaction itself reports no error
         self.assertEqual(dev.last_status, STATUS_IDLE)
-        dev.read_reg(REG_ID)                    # 下一次事务才看到上次的 BAD_CMD
+        dev.read_reg(REG_ID)                    # the next transaction is the one that reports the previous BAD_CMD
         self.assertTrue(dev.last_status & STATUS_BAD_CMD)
         dev.read_reg(REG_ID)
         self.assertEqual(dev.last_status, STATUS_IDLE)
@@ -66,7 +66,7 @@ class TestDeviceSim(unittest.TestCase):
         dev, _ = make_dev()
         dev.write_reg(REG_ID, 0xDEAD)
         dev.read_reg(REG_ID)
-        # ID 仍然是原值
+        # ID still has its original value
         self.assertEqual(dev.read_reg(REG_ID), DEVICE_ID)
 
     def test_bad_crc_write_is_not_committed(self):
@@ -74,10 +74,10 @@ class TestDeviceSim(unittest.TestCase):
         dev.write_reg(REG_SCRATCH, 0x1111)
         cmd = make_cmd(True, REG_SCRATCH, 1)
         req = build_request(cmd, [0x2222])
-        req[-1] ^= 0x0001                       # 破坏 CRC_M
+        req[-1] ^= 0x0001                       # corrupt CRC_M
         slave.xfer(req)
-        self.assertEqual(dev.read_reg(REG_SCRATCH), 0x1111)   # 未提交
-        # 下一次事务返回的是上次（坏 CRC）事务的状态
+        self.assertEqual(dev.read_reg(REG_SCRATCH), 0x1111)   # not committed
+        # the next transaction returns the status of the previous (bad-CRC) one
         self.assertTrue(dev.last_status & STATUS_CRC_ERR)
 
     def test_errcnt_counts_and_clears(self):
@@ -98,15 +98,15 @@ class TestDeviceSim(unittest.TestCase):
 
     def test_length_mismatch_is_bad_cmd(self):
         dev, slave = make_dev()
-        cmd = make_cmd(True, REG_SCRATCH, 4)     # 声称 4 个字
-        req = build_request(cmd, [0x7777])       # 实际只有 1 个字
+        cmd = make_cmd(True, REG_SCRATCH, 4)     # claims 4 words
+        req = build_request(cmd, [0x7777])       # but only 1 word is actually sent
         slave.xfer(req)
         dev.read_reg(REG_ID)
         self.assertTrue(dev.last_status & STATUS_BAD_CMD)
         self.assertEqual(dev.read_reg(REG_SCRATCH), 0)
 
     def test_line_noise_is_detected(self):
-        dev, _ = make_dev(rx_ber=1.0, seed=1)    # 每个返回字都被翻转一位
+        dev, _ = make_dev(rx_ber=1.0, seed=1)    # every returned word has one bit flipped
         with self.assertRaises(ProtocolError):
             dev.read_reg(REG_ID)
         self.assertGreaterEqual(dev.stats["crc_errors"] + dev.stats["echo_errors"], 1)

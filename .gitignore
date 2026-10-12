@@ -3,7 +3,7 @@ __pycache__/
 .venv/
 .DS_Store
 
-# 仿真 / 综合产物（ISE、ModelSim、Vivado 等）
+# Simulation / synthesis artifacts (ISE, ModelSim, Vivado, ...)
 *.wlf
 *.vcd
 xst/
@@ -16,4 +16,4 @@ _xmsgs/
 work/
 transcript
 
-# results/ 下的 CSV 是实验证据，默认提交
+# CSVs under results/ are experiment evidence and are committed by default

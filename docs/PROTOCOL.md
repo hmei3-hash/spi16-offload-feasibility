@@ -1,89 +1,105 @@
-# SPI16 协议规格 v0.1
+# SPI16 Protocol Specification v0.1
 
-16 位字的寄存器式 SPI 协议，用于判断"把某块计算 offload 到 FPGA"是否可行。
-这份文档是主机端代码、软件仿真从机和你自己写的 RTL / testbench 共同的依据。
+A register-style SPI protocol with 16-bit words, used to judge whether offloading a computation to an
+FPGA is worthwhile. This document is the common reference for the host code, the software slave model,
+and the RTL and testbench you write yourself.
 
-## 1. 物理层
+## 1. Physical layer
 
-| 项 | 取值 |
+| Item | Value |
 |---|---|
-| SPI 模式 | Mode 0（CPOL=0, CPHA=0） |
-| 位序 | MSB 先出 |
-| 字宽 | 16 位，字节序大端（高字节先传） |
-| 帧界定 | CS 低电平为一次事务；CS 上升沿结束事务 |
-| 可选信号 | `DRDY`（FPGA 到主机的中断/就绪线，v0.1 不强制使用） |
+| SPI mode | Mode 0 (CPOL = 0, CPHA = 0) |
+| Bit order | MSB first |
+| Word width | 16 bits, big-endian byte order (high byte first) |
+| Framing | CS low delimits one transaction; the rising edge of CS ends it |
+| Optional signal | `DRDY` (FPGA-to-host interrupt / ready line; not required in v0.1) |
 
-电平和引脚：接线前必须核对开发板原理图、I/O bank 电压和排针定义。Raspberry Pi GPIO 是 3.3 V 且不耐 5 V。
+Levels and pins: before wiring anything, check the board schematic, the I/O bank voltage and the header
+pinout. Raspberry Pi GPIO is 3.3 V and is not 5 V tolerant.
 
-## 2. 事务格式
+## 2. Transaction format
 
-一次事务共 `N + 3` 个字，`N` 是负载字数（1 到 64）。读写的长度相同。
+A transaction is `N + 3` words, where `N` is the payload length (1 to 64 words). Reads and writes have
+the same length.
 
 ```
 MOSI: [ CMD ][ GAP=0x0000 ][ D0 ... D(N-1) ][ CRC_M ]
 MISO: [ STATUS_PREV ][ ECHO ][ R0 ... R(N-1) ][ CRC_S ]
 ```
 
-- 写：`D0..D(N-1)` 是要写的数据，MISO 上的 `R*` 全为 0。
-- 读：`D*` 为 0（占位），MISO 上的 `R*` 是读出的数据。
-- `GAP` 给从机一个字时间（16 个 SCLK）去解析命令并取数。读数据从第 3 个字开始出现。
-- `ECHO` 是从机回送它解析到的 CMD，主机据此确认命令没被传坏。
-- `STATUS_PREV` 是**上一次事务**的状态（从机在本次收到 CMD 之前还不知道本次结果）。
-- 事务效率约为 `N / (N + 3)`。
+- Write: `D0..D(N-1)` is the data to write; the `R*` words on MISO are all 0.
+- Read: `D*` are 0 (placeholders); the `R*` words on MISO carry the data read.
+- `GAP` gives the slave one word time (16 SCLK cycles) to decode the command and fetch data. Read
+  data therefore starts at the third word.
+- `ECHO` is the CMD the slave decoded, sent back so the host can confirm the command was not corrupted.
+- `STATUS_PREV` is the status of the **previous** transaction (the slave does not know the result of the
+  current one before it has received the CMD).
+- Transaction efficiency is roughly `N / (N + 3)`.
 
-### 2.1 命令字 CMD
+### 2.1 Command word (CMD)
 
-| 位 | 名称 | 含义 |
+| Bits | Name | Meaning |
 |---|---|---|
-| 15 | W | 1 = 写，0 = 读 |
-| 14 | INC | 1 = 地址每个字自增；0 = 所有字访问同一地址（FIFO 式） |
-| 13:8 | LEN-1 | 负载字数减 1（0 到 63，即 1 到 64 个字） |
-| 7:0 | ADDR | 起始寄存器地址 |
+| 15 | W | 1 = write, 0 = read |
+| 14 | INC | 1 = address auto-increments per word; 0 = every word accesses the same address (FIFO style) |
+| 13:8 | LEN-1 | Payload length minus one (0 to 63, i.e. 1 to 64 words) |
+| 7:0 | ADDR | Starting register address |
 
-CMD 中的长度必须与实际帧长一致，否则视为坏命令。
+The length in CMD must match the actual frame length; otherwise the command is treated as bad.
 
-### 2.2 状态字 STATUS
+### 2.2 Status word (STATUS)
 
-| 位 | 名称 | 含义 |
+| Bits | Name | Meaning |
 |---|---|---|
-| 15:12 | VER | 协议版本，v0.1 = 0x1 |
-| 1 | BAD_CMD | 上次事务命令非法（地址未映射、长度与帧长不符） |
-| 0 | CRC_ERR | 上次事务 CRC 不匹配 |
+| 15:12 | VER | Protocol version; v0.1 = 0x1 |
+| 1 | BAD_CMD | Previous transaction had an illegal command (unmapped address, or length not matching the frame) |
+| 0 | CRC_ERR | Previous transaction had a CRC mismatch |
 
-空闲无错时 STATUS = `0x1000`。
+Idle with no error: STATUS = `0x1000`.
 
-### 2.3 校验
+### 2.3 Checksum
 
-CRC-16/CCITT-FALSE：多项式 `0x1021`，初值 `0xFFFF`，不反射，输出不取反。
-输入按大端字节序逐字喂入。检验值：`"123456789"` 的 CRC 为 `0x29B1`。
+CRC-16/CCITT-FALSE: polynomial `0x1021`, initial value `0xFFFF`, no reflection, no final XOR.
+Input is fed word by word in big-endian byte order. Check value: the CRC of `"123456789"` is `0x29B1`.
 
-- `CRC_M` 覆盖 MOSI 上除它自己外的所有字：`CMD, GAP, D*`。
-- `CRC_S` 覆盖 MISO 上除它自己外的所有字：`STATUS_PREV, ECHO, R*`。
+- `CRC_M` covers every word on MOSI except itself: `CMD, GAP, D*`.
+- `CRC_S` covers every word on MISO except itself: `STATUS_PREV, ECHO, R*`.
 
-**写入必须在 CRC 校验通过后才生效。** CRC 失败的写事务不能改变任何寄存器，并要置 `CRC_ERR`、增加错误计数。
-这意味着 RTL 需要把写数据暂存，在事务末尾（CS 上升沿，CRC 比对之后）再提交。
+**A write takes effect only after its CRC has been verified.** A write transaction with a bad CRC must
+not change any register; it must set `CRC_ERR` and increment the error counter. This means the RTL has to
+buffer the write data and commit it at the end of the transaction (after the CS rising edge, once the CRC
+has been compared).
 
-## 3. 寄存器表（测试用）
+## 3. Register map (for testing)
 
-| 地址 | 名称 | 访问 | 说明 |
+| Address | Name | Access | Description |
 |---|---|---|---|
-| 0x00 | ID | RO | 固定 `0x5A16` |
-| 0x01 | VERSION | RO | 设计版本，v0.1 = `0x0001` |
-| 0x02 | SCRATCH | RW | 回环测试用 |
-| 0x03 | ERRCNT | RO | CRC 错误事务计数；写任意值清零；饱和于 0xFFFF |
-| 0x04 | TXNCNT | RO | 事务计数（含错误事务），饱和于 0xFFFF |
-| 0x10 到 0x4F | TESTMEM | RW | 64 个字的测试存储，用于突发读写与吞吐测试 |
+| 0x00 | ID | RO | Fixed `0x5A16` |
+| 0x01 | VERSION | RO | Design version; v0.1 = `0x0001` |
+| 0x02 | SCRATCH | RW | Loopback testing |
+| 0x03 | ERRCNT | RO | Count of CRC-error transactions; writing any value clears it; saturates at 0xFFFF |
+| 0x04 | TXNCNT | RO | Transaction count (including erroneous ones); saturates at 0xFFFF |
+| 0x10 to 0x4F | TESTMEM | RW | 64 words of test memory for burst read/write and throughput tests |
 
-访问未映射地址：不修改任何状态，读返回 0，并置 `BAD_CMD`。
+Accessing an unmapped address changes no state, reads return 0, and `BAD_CMD` is set.
 
-## 4. 设计决策与常见的坑（给 RTL 作者）
+## 4. Design decisions and pitfalls (for the RTL author)
 
-1. **跨时钟域**：SPI 时钟与系统时钟异步。多位数据不要直接用两级触发器同步；用握手或异步 FIFO。
-2. **CS 复位**：CS 拉高必须无条件复位帧内状态机（位计数、字计数、CRC 累加器）。
-3. **MISO 三态**：CS 为高时 MISO 应为高阻（若多个从机共线）。三态一般放在顶层的 IOBUF 里，不要放在子模块里。
-4. **采样沿**：Mode 0 下，在 SCLK 上升沿采样 MOSI，在下降沿更新 MISO。第一个 MISO 位在 CS 下降后、第一个 SCLK 上升沿之前就必须有效。
-5. **读数据准备时间**：GAP 字提供 16 个 SCLK 的取数时间，但 TESTMEM 若用 BRAM，同步读有一拍延迟，要在设计里算清楚。
-6. **只在 CRC 通过后提交写**（见 2.3）。
-7. **ISE 工具链**：Spartan-6 只能用 ISE（XST 对 SystemVerilog 支持有限），RTL 建议写 Verilog-2001。
-8. **亚稳态**：`cs_n`、`sclk`、`mosi` 来自外部，进入系统时钟域前必须同步。如果整个设计都在 SCLK 域，则注意 SCLK 上升沿数量与字对齐。
-9. **字节序**：两端统一大端。主机用 `struct.pack(">H")`，不要依赖机器字节序。
+1. **Clock domain crossing**: SCLK and the system clock are asynchronous. Do not synchronize multi-bit
+   data with plain two-flop synchronizers; use a handshake or an asynchronous FIFO.
+2. **CS reset**: CS going high must unconditionally reset the in-frame state (bit counter, word counter,
+   CRC accumulator).
+3. **MISO tri-state**: when CS is high, MISO should be high impedance (if several slaves share the line).
+   Put the tri-state in an IOBUF at the top level, not in a submodule.
+4. **Sampling edge**: in Mode 0, sample MOSI on the rising edge of SCLK and update MISO on the falling
+   edge. The first MISO bit must be valid after CS falls and before the first SCLK rising edge.
+5. **Read data preparation time**: the GAP word gives 16 SCLK cycles to fetch data, but if TESTMEM is a
+   BRAM, a synchronous read has one cycle of latency. Account for it in the design.
+6. **Commit writes only after the CRC passes** (see 2.3).
+7. **ISE toolchain**: Spartan-6 supports only ISE, and XST has limited SystemVerilog support. Write
+   Verilog-2001.
+8. **Metastability**: `cs_n`, `sclk` and `mosi` come from outside; synchronize them before they enter the
+   system clock domain. If the whole design lives in the SCLK domain, pay attention to how SCLK rising
+   edges line up with word boundaries.
+9. **Byte order**: use big-endian on both ends. On the host use `struct.pack(">H")`; do not depend on
+   machine endianness.

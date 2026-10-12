@@ -1,4 +1,4 @@
-"""帧编码/解码，对应 docs/PROTOCOL.md 第 2 节。"""
+"""Frame encoding/decoding; see section 2 of docs/PROTOCOL.md."""
 
 import struct
 from dataclasses import dataclass
@@ -11,11 +11,11 @@ PROTO_VER = 0x1
 
 STATUS_CRC_ERR = 1 << 0
 STATUS_BAD_CMD = 1 << 1
-STATUS_IDLE = PROTO_VER << 12  # 空闲无错
+STATUS_IDLE = PROTO_VER << 12  # idle, no error
 
 
 class ProtocolError(Exception):
-    """帧长度、回显或 CRC 不符。"""
+    """Frame length, echo or CRC mismatch."""
 
 
 def make_cmd(write: bool, addr: int, length: int, inc: bool = True) -> int:
@@ -27,12 +27,12 @@ def make_cmd(write: bool, addr: int, length: int, inc: bool = True) -> int:
 
 
 def parse_cmd(cmd: int):
-    """返回 (write, inc, length, addr)。"""
+    """Return (write, inc, length, addr)."""
     return bool(cmd & 0x8000), bool(cmd & 0x4000), ((cmd >> 8) & 0x3F) + 1, cmd & 0xFF
 
 
 def build_request(cmd: int, payload: Sequence[int]) -> List[int]:
-    """MOSI: CMD, GAP(0), payload..., CRC_M。读事务的 payload 传全 0。"""
+    """MOSI: CMD, GAP(0), payload..., CRC_M. For read transactions the payload is all zeros."""
     words = [cmd & 0xFFFF, 0x0000] + [w & 0xFFFF for w in payload]
     words.append(crc16_words(words))
     return words
@@ -40,13 +40,13 @@ def build_request(cmd: int, payload: Sequence[int]) -> List[int]:
 
 @dataclass
 class Response:
-    status: int          # 上一次事务的状态
+    status: int          # status of the previous transaction
     echo: int
     data: List[int]
 
 
 def parse_response(cmd: int, rx: Sequence[int], length: int) -> Response:
-    """校验 MISO：STATUS_PREV, ECHO, R..., CRC_S。出错抛 ProtocolError。"""
+    """Validate MISO: STATUS_PREV, ECHO, R..., CRC_S. Raises ProtocolError on failure."""
     expected = length + 3
     if len(rx) != expected:
         raise ProtocolError(f"length: expected {expected} words, got {len(rx)}")

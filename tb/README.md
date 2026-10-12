@@ -1,33 +1,37 @@
 # tb/
 
-testbench 由你自己写。下面是建议覆盖的测试清单，规格见 [`../docs/PROTOCOL.md`](../docs/PROTOCOL.md)。
+You write the testbench yourself. Below is a suggested checklist of what to cover; the spec is in
+[`../docs/PROTOCOL.md`](../docs/PROTOCOL.md).
 
-## 直接测试（directed）
+## Directed tests
 
-| # | 内容 | 期望 |
+| # | Test | Expected result |
 |---|---|---|
-| 1 | 读 ID（0x00） | 返回 `0x5A16`，ECHO 等于发出的 CMD，CRC_S 正确 |
-| 2 | 读 VERSION | 返回 `0x0001` |
-| 3 | 写 SCRATCH 再读回 | 读回值一致 |
-| 4 | 写 TESTMEM 突发（INC=1，N=64）再读回 | 全部一致 |
-| 5 | INC=0 写同一地址 N 个字 | 最后一个字生效 |
-| 6 | 访问未映射地址 | 读返回 0，下次事务 STATUS 里 BAD_CMD=1 |
-| 7 | 命令里的 LEN 与实际帧长不符 | BAD_CMD=1，无副作用 |
-| 8 | CRC_M 故意错一位的写事务 | 寄存器不变，下次 STATUS 里 CRC_ERR=1，ERRCNT 加 1 |
-| 9 | 写 ERRCNT | 清零 |
-| 10 | 事务中途 CS 提前拉高 | 状态机复位，下一次事务正常 |
-| 11 | 连续背靠背事务（CS 间隔最短） | 无丢字 |
+| 1 | Read ID (0x00) | Returns `0x5A16`, ECHO equals the CMD sent, CRC_S is correct |
+| 2 | Read VERSION | Returns `0x0001` |
+| 3 | Write SCRATCH, read it back | Value read back matches |
+| 4 | Burst write to TESTMEM (INC=1, N=64), read back | Every word matches |
+| 5 | INC=0, write N words to the same address | The last word takes effect |
+| 6 | Access an unmapped address | Read returns 0; the next transaction's STATUS has BAD_CMD=1 |
+| 7 | LEN in the command does not match the actual frame length | BAD_CMD=1, no side effects |
+| 8 | Write transaction with CRC_M deliberately wrong by one bit | Registers unchanged; next STATUS has CRC_ERR=1; ERRCNT increments |
+| 9 | Write ERRCNT | Clears to 0 |
+| 10 | CS goes high in the middle of a transaction | State machine resets; the next transaction works |
+| 11 | Back-to-back transactions (minimum CS gap) | No dropped words |
 
-## 随机测试
+## Randomized tests
 
-- 随机地址、长度、INC、读写、数据，对照一个简单的软件参考模型逐字比较。
-- 随机在帧中插入单比特错误（MOSI 上），检查错误被检出且写不生效。
+- Random address, length, INC, read/write and data, compared word by word against a simple software
+  reference model.
+- Randomly inject single-bit errors into a frame on MOSI; check that the error is detected and the write
+  does not take effect.
 
-## 时序测试
+## Timing tests
 
-- 用不同的 SCLK 与系统时钟比例运行，找出同步失效的边界。
-- 在 SCLK 与系统时钟的相位随机偏移下重复上述测试。
+- Run with different SCLK-to-system-clock ratios to find where synchronization breaks.
+- Repeat the tests with random phase offsets between SCLK and the system clock.
 
-## 参考
+## Reference
 
-- 主机端 `host/spi16/sim.py` 是同一份协议的软件模型，可以用来生成测试向量，但 testbench 本身以及比较逻辑请自己写。
+- `host/spi16/sim.py` is a software model of the same protocol and can be used to generate test vectors,
+  but the testbench itself and its comparison logic are yours to write.

@@ -1,53 +1,59 @@
 # spi16-offload-feasibility
 
-用一个 16 位字的 SPI 协议，测量并判断"把某块计算从主机 offload 到 FPGA"是否可行。
-这个仓库的目的是拿数据下结论：继续做，还是废弃。
+Measure and judge whether offloading a piece of computation from a host to an FPGA over a
+16-bit-word SPI protocol is feasible. The goal of this repository is to reach a conclusion from data:
+keep going, or drop the idea.
 
-## 里面有什么
+## What is in here
 
-| 目录 | 内容 | 状态 |
+| Directory | Contents | Status |
 |---|---|---|
-| `docs/PROTOCOL.md` | 协议规格：帧格式、命令字、状态字、CRC、寄存器表、RTL 设计要点 | 完成 |
-| `docs/EXPERIMENT.md` | 实验阶段、运行方法、判定标准模板（阈值由你填） | 完成 |
-| `host/` | 主机端 Python：协议库、软件仿真从机、benchmark 工具、单元测试 | 完成，26 个测试通过 |
-| `rtl/` | `spi16_slave.v` 骨架和设计问题清单 | 只有骨架，**由你实现** |
-| `tb/` | testbench 测试清单 | 只有清单，**由你实现** |
-| `results/` | benchmark 输出 CSV | 空，等你跑出数据 |
+| `docs/PROTOCOL.md` | Protocol spec: frame format, command word, status word, CRC, register map, RTL design notes | Done |
+| `docs/EXPERIMENT.md` | Experiment stages, how to run, go/no-go criteria template (you fill in the thresholds) | Done |
+| `host/` | Host-side Python: protocol library, software slave model, benchmark tool, unit tests | Done, 26 tests pass |
+| `rtl/` | `spi16_slave.v` skeleton and a list of design questions | Skeleton only, **to be implemented by you** |
+| `tb/` | Testbench checklist | Checklist only, **to be implemented by you** |
+| `results/` | Benchmark CSV output | Empty until you collect data |
 
-## 快速开始
+## Quick start
 
 ```bash
 cd host
 
-# 1. 不需要任何硬件：协议库自测 + 软件仿真从机上的 benchmark 冒烟
+# 1. No hardware needed: library self-test + benchmark smoke run against the software slave
 python3 -m unittest discover -s tests -v
 python3 bench.py device --sim --iters 200 --out /tmp
 
-# 2. 在 Raspberry Pi 上测原始 SPI 性能
-#    把 MOSI(GPIO10, 排针 19) 和 MISO(GPIO9, 排针 21) 用杜邦线短接
+# 2. Raw SPI performance on a Raspberry Pi
+#    Jumper MOSI (GPIO10, header pin 19) to MISO (GPIO9, header pin 21)
 sudo apt install python3-spidev
 python3 bench.py raw --speeds 1e6,4e6,8e6,16e6,32e6
 
-# 3. 接上 FPGA（接线前先核对原理图、I/O 电压和引脚，不要直连 5 V）
+# 3. With the FPGA connected (check the board schematic, I/O bank voltage and pinout first;
+#    never connect 5 V logic to Pi GPIO)
 python3 bench.py device --speeds 1e6,4e6,8e6,16e6
 ```
 
-结果会追加写入 `results/`，字段说明见 `docs/EXPERIMENT.md`。
+Each run writes a new timestamped CSV to `results/`. See `docs/EXPERIMENT.md` for the decision criteria.
 
-## 重要说明
+## Important notes
 
-- `host/spi16/sim.py` 是软件仿真从机，**只用来测试主机代码**。用它跑出的任何"性能"都没有意义，
-  所以 `--sim` 的输出建议写到 `/tmp`，不要提交到 `results/`。
-- FPGA 一侧的 RTL 和 testbench 需要你自己写，仓库里只有规格、骨架和测试清单。
-- Python 层有解释器开销，测得的延迟偏悲观。如果结论落在判定边界上，需要用 C 重测。
-- 没有在真实硬件上跑过：raw 和 device 模式的硬件路径目前只有代码，没有实测数据。
+- `host/spi16/sim.py` is a software slave model that exists **only to test the host code**. Any
+  "performance" measured against it is meaningless, so write `--sim` output to `/tmp` and do not commit it
+  to `results/`.
+- The FPGA side (RTL and testbench) is yours to write. The repository contains only the spec, a
+  skeleton and a test checklist.
+- The Python layer adds interpreter overhead, so measured latencies are pessimistic. If the conclusion
+  lands near a decision boundary, re-measure in C.
+- The hardware paths have not been run on real hardware: `raw` and `device` modes exist as code only,
+  with no measured data yet.
 
-## 目录
+## Layout
 
 ```
 docs/    PROTOCOL.md  EXPERIMENT.md
 host/    spi16/ (crc, frame, device, sim, transport)  bench.py  tests/
 rtl/     spi16_slave.v  README.md
 tb/      README.md
-results/ （benchmark CSV）
+results/ (benchmark CSVs)
 ```

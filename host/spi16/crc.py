@@ -1,6 +1,6 @@
-"""CRC-16/CCITT-FALSE（多项式 0x1021，初值 0xFFFF，不反射，不取反）。
+"""CRC-16/CCITT-FALSE (polynomial 0x1021, init 0xFFFF, no reflection, no final XOR).
 
-字按大端字节序喂入，见 docs/PROTOCOL.md。
+Words are fed in big-endian byte order; see docs/PROTOCOL.md.
 """
 
 from typing import Iterable
@@ -29,7 +29,7 @@ def crc16_bytes(data: bytes, init: int = 0xFFFF) -> int:
 
 
 def crc16_words(words: Iterable[int], init: int = 0xFFFF) -> int:
-    """对 16 位字序列求 CRC，每个字按高字节在前处理。"""
+    """CRC over a sequence of 16-bit words, each processed high byte first."""
     crc = init
     for w in words:
         crc = ((crc << 8) & 0xFFFF) ^ _TABLE[((crc >> 8) ^ ((w >> 8) & 0xFF)) & 0xFF]

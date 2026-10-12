@@ -1,4 +1,4 @@
-"""传输层：把一次 CS 帧的 16 位字序列发出去，同时收回等长的字序列。"""
+"""Transport layer: send one CS-framed sequence of 16-bit words and receive an equally long sequence back."""
 
 from typing import List, Sequence
 
@@ -6,17 +6,18 @@ from .frame import bytes_to_words, words_to_bytes
 
 
 class SpidevTransport:
-    """基于 Linux spidev（Raspberry Pi）。
+    """Based on Linux spidev (Raspberry Pi).
 
-    注意：
-    - spidev 单次传输默认上限 4096 字节（内核参数 bufsiz），本类不做拆分。
-    - 开启 SPI：`sudo raspi-config` 打开 SPI，或在 config.txt 里加 `dtparam=spi=on`。
+    Notes:
+    - spidev limits a single transfer to 4096 bytes by default (kernel parameter bufsiz);
+      this class does not split transfers.
+    - Enable SPI with `sudo raspi-config`, or add `dtparam=spi=on` to config.txt.
     """
 
     MAX_BYTES = 4096
 
     def __init__(self, bus: int = 0, dev: int = 0, speed_hz: int = 1_000_000, mode: int = 0):
-        import spidev  # 延迟导入，没有硬件的机器也能跑单元测试
+        import spidev  # imported lazily so unit tests run on machines without SPI hardware
 
         self.spi = spidev.SpiDev()
         self.spi.open(bus, dev)

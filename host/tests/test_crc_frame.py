@@ -16,7 +16,7 @@ from spi16.frame import (
 
 class TestCrc(unittest.TestCase):
     def test_known_check_value(self):
-        # CRC-16/CCITT-FALSE 的标准检验值
+        # standard check value for CRC-16/CCITT-FALSE
         self.assertEqual(crc16_bytes(b"123456789"), 0x29B1)
 
     def test_words_match_bytes(self):
@@ -87,7 +87,7 @@ class TestFrame(unittest.TestCase):
     def test_bytes_words_roundtrip(self):
         words = [0x0000, 0x00FF, 0xFF00, 0xABCD]
         self.assertEqual(bytes_to_words(words_to_bytes(words)), words)
-        self.assertEqual(words_to_bytes([0x1234]), b"\x12\x34")  # 大端
+        self.assertEqual(words_to_bytes([0x1234]), b"\x12\x34")  # big-endian
 
     def test_decode_status(self):
         self.assertEqual(decode_status(STATUS_IDLE), {"version": 1, "crc_err": False, "bad_cmd": False})

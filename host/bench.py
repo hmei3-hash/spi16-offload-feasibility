@@ -1,16 +1,17 @@
 #!/usr/bin/env python3
-"""SPI16 offload 可行性 benchmark。
+"""SPI16 offload feasibility benchmark.
 
-模式：
-  raw     MOSI 与 MISO 短接，测 Pi 端 SPI 的原始吞吐、延迟、CPU 占用、位错误。
-  device  对真实 FPGA（或 --sim 软件仿真从机）做协议事务：ID、回环、突发读写、吞吐。
+Modes:
+  raw     MOSI jumpered to MISO; measures the Pi's raw SPI throughput, latency, CPU usage and bit errors.
+  device  Protocol transactions against a real FPGA (or the --sim software slave): ID, loopback,
+          burst read/write, throughput.
 
-示例：
+Examples:
   python3 bench.py device --sim --iters 200
   python3 bench.py raw --speeds 1e6,4e6,8e6,16e6 --sizes 2,16,128,1024,4096
   python3 bench.py device --speeds 1e6,4e6,8e6
 
-结果追加写入 ../results/bench_<mode>_<时间戳>.csv。
+Results are written to ../results/bench_<mode>_<timestamp>.csv.
 """
 
 import argparse
@@ -52,6 +53,10 @@ class Recorder:
         os.makedirs(out_dir, exist_ok=True)
         stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         self.path = os.path.join(out_dir, f"bench_{mode}_{stamp}.csv")
+        suffix = 1
+        while os.path.exists(self.path):  # two runs within the same second must not overwrite each other
+            self.path = os.path.join(out_dir, f"bench_{mode}_{stamp}_{suffix}.csv")
+            suffix += 1
         self.mode = mode
         self.f = open(self.path, "w", newline="")
         self.w = csv.DictWriter(self.f, fieldnames=FIELDS)
@@ -74,9 +79,9 @@ class Recorder:
     def close(self):
         self.f.close()
         if self.rows == 0:
-            os.remove(self.path)  # 没有任何结果就不留空文件
+            os.remove(self.path)  # do not leave an empty file behind if there were no results
             return
-        print(f"\n结果已写入 {self.path}")
+        print(f"\nResults written to {self.path}")
 
 
 def summarize(durs_us, payload_bytes, wall_s, cpu_s, speed_hz):
@@ -97,7 +102,7 @@ def summarize(durs_us, payload_bytes, wall_s, cpu_s, speed_hz):
 
 
 def timed_loop(fn, iters):
-    """fn() 返回 (耗时被计入的结果)；这里只计时。返回 (durs_us, wall_s, cpu_s)。"""
+    """Time fn() over `iters` calls. Returns (durs_us, wall_s, cpu_s)."""
     durs = []
     c0, w0 = time.process_time(), time.perf_counter()
     for _ in range(iters):
@@ -132,7 +137,7 @@ def run_raw(args, rec):
                     if last["rx"] != payload:
                         bad += sum(1 for a, b in zip(last["rx"], payload) if a != b)
 
-                # 位错误统计放在计时之外：先测时间，再单独跑校验
+                # bit-error counting is kept out of the timed loop: measure time first, then verify separately
                 durs, wall, cpu = timed_loop(one, args.iters)
                 for _ in range(min(args.iters, 200)):
                     checked()
@@ -161,15 +166,15 @@ def run_device(args, rec):
         transport = make_transport(args, speed)
         dev = Spi16Device(transport)
         try:
-            # --- 功能检查
+            # --- functional checks
             perr = derr = 0
             try:
                 id_ok = dev.check_id()
             except ProtocolError as e:
-                print(f"[{speed}] ID 读取失败：{e}")
+                print(f"[{speed}] ID read failed: {e}")
                 id_ok = False
             if not id_ok and not args.force:
-                print(f"[{speed}] 设备无响应或 ID 不符，跳过该速率（--force 可强制继续）")
+                print(f"[{speed}] No response or wrong ID; skipping this speed (use --force to continue anyway)")
                 rec.add(speed_hz=speed, test="id_check", size=1, iters=1,
                         protocol_errors=1, data_errors=0)
                 continue
@@ -184,7 +189,7 @@ def run_device(args, rec):
             rec.add(speed_hz=speed, test="scratch_check", size=len(patterns), iters=len(patterns),
                     protocol_errors=perr, data_errors=derr)
 
-            # --- 单寄存器读延迟
+            # --- single-register read latency
             perr = 0
 
             def rd():
@@ -202,7 +207,7 @@ def run_device(args, rec):
                     protocol_errors=perr, data_errors=0,
                     **summarize(durs, 2, wall, cpu, speed))
 
-            # --- 突发读写
+            # --- burst read/write
             for n in parse_list(args.bursts, int):
                 data = [rng.randrange(0x10000) for _ in range(n)]
                 perr = derr = 0
@@ -234,7 +239,7 @@ def run_device(args, rec):
 
                 perr = 0
                 mismatches = 0
-                wr()  # 确保 TESTMEM 里是 data
+                wr()  # make sure TESTMEM holds `data`
                 c0, w0 = time.process_time(), time.perf_counter()
                 durs = []
                 for _ in range(args.iters):
@@ -248,11 +253,11 @@ def run_device(args, rec):
                         protocol_errors=perr, data_errors=mismatches,
                         **summarize(durs, n * 2, wall, cpu, speed))
 
-            # --- 设备侧错误计数
+            # --- device-side error count
             try:
-                print(f"[{speed}] 设备侧 ERRCNT = {dev.read_reg(REG_ERRCNT)}，主机侧统计 = {dev.stats}")
+                print(f"[{speed}] device ERRCNT = {dev.read_reg(REG_ERRCNT)}, host stats = {dev.stats}")
             except ProtocolError:
-                print(f"[{speed}] 读取 ERRCNT 失败，主机侧统计 = {dev.stats}")
+                print(f"[{speed}] failed to read ERRCNT, host stats = {dev.stats}")
         finally:
             transport.close()
 
@@ -262,32 +267,33 @@ def main():
     ap.add_argument("mode", choices=["raw", "device"])
     ap.add_argument("--bus", type=int, default=0)
     ap.add_argument("--dev", type=int, default=0)
-    ap.add_argument("--speeds", default="1e6,4e6,8e6", help="SPI 时钟列表(Hz)，逗号分隔")
-    ap.add_argument("--sizes", default="2,16,128,1024,4096", help="raw 模式的传输字节数")
-    ap.add_argument("--bursts", default="1,4,16,64", help="device 模式的突发字数")
+    ap.add_argument("--speeds", default="1e6,4e6,8e6", help="comma-separated SPI clock list (Hz)")
+    ap.add_argument("--sizes", default="2,16,128,1024,4096", help="transfer sizes in bytes for raw mode")
+    ap.add_argument("--bursts", default="1,4,16,64", help="burst lengths in words for device mode")
     ap.add_argument("--iters", type=int, default=1000)
     ap.add_argument("--warmup", type=int, default=50)
     ap.add_argument("--seed", type=int, default=1)
-    ap.add_argument("--sim", action="store_true", help="device 模式使用软件仿真从机（无需硬件）")
-    ap.add_argument("--ber", type=float, default=0.0, help="--sim 时每个 MISO 字被翻转一位的概率")
-    ap.add_argument("--force", action="store_true", help="ID 检查失败也继续")
+    ap.add_argument("--sim", action="store_true", help="use the software slave in device mode (no hardware needed)")
+    ap.add_argument("--ber", type=float, default=0.0, help="with --sim: probability that each MISO word has one bit flipped")
+    ap.add_argument("--force", action="store_true", help="continue even if the ID check fails")
     ap.add_argument("--out", default=os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "results"))
     args = ap.parse_args()
 
     if args.mode == "raw" and args.sim:
-        ap.error("raw 模式需要真实 SPI 设备，不支持 --sim")
+        ap.error("raw mode needs a real SPI device and does not support --sim")
 
     rec = Recorder(args.mode, args.out)
     try:
         (run_raw if args.mode == "raw" else run_device)(args, rec)
     except ImportError as e:
         raise SystemExit(
-            f"缺少依赖：{e}\n在 Raspberry Pi 上请安装：sudo apt install python3-spidev "
-            "（或 pip install spidev），并确认已开启 SPI。"
+            f"Missing dependency: {e}\nOn a Raspberry Pi install it with: "
+            "sudo apt install python3-spidev (or pip install spidev), and make sure SPI is enabled."
         )
     except FileNotFoundError as e:
         raise SystemExit(
-            f"打不开 SPI 设备：{e}\n请确认已开启 SPI，且存在 /dev/spidev{args.bus}.{args.dev}。"
+            f"Cannot open the SPI device: {e}\n"
+            f"Make sure SPI is enabled and /dev/spidev{args.bus}.{args.dev} exists."
         )
     finally:
         rec.close()

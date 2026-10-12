@@ -1,4 +1,4 @@
-"""寄存器级访问接口。"""
+"""Register-level access interface."""
 
 from typing import List, Sequence
 
@@ -22,10 +22,11 @@ DEVICE_ID = 0x5A16
 
 
 class Spi16Device:
-    """在任意 Transport 上实现读写事务。
+    """Implements read/write transactions on any Transport.
 
-    注意：`last_status` 是**上一次**事务的状态（见 PROTOCOL.md 第 2 节），
-    读写完一次后看到的状态标志属于再之前的那次事务。
+    Note: `last_status` is the status of the **previous** transaction (see section 2 of
+    PROTOCOL.md), so the status flags seen after a read or write belong to the transaction
+    before that one.
     """
 
     def __init__(self, transport):

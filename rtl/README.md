@@ -1,28 +1,32 @@
 # rtl/
 
-这里只放骨架 `spi16_slave.v`，实现由你自己完成，规格见 [`../docs/PROTOCOL.md`](../docs/PROTOCOL.md)。
+This directory holds only the skeleton `spi16_slave.v`. The implementation is yours to write; the spec is
+in [`../docs/PROTOCOL.md`](../docs/PROTOCOL.md).
 
-## 建议的模块划分
+## Suggested module breakdown
 
-| 模块 | 职责 |
+| Module | Responsibility |
 |---|---|
-| `spi_rx_tx` | 同步外部信号、位/字计数、移位收发 |
-| `frame_fsm` | 帧状态：CMD、GAP、DATA、CRC；CS 上升沿复位 |
-| `crc16` | CRC-16/CCITT-FALSE，按位或按字更新 |
-| `regfile` | ID、VERSION、SCRATCH、ERRCNT、TXNCNT、TESTMEM |
-| `top` | 例化以上模块，处理 MISO 三态、引脚约束 |
+| `spi_rx_tx` | Synchronize external signals, bit/word counting, shift in/out |
+| `frame_fsm` | Frame states: CMD, GAP, DATA, CRC; reset on the CS rising edge |
+| `crc16` | CRC-16/CCITT-FALSE, updated per bit or per word |
+| `regfile` | ID, VERSION, SCRATCH, ERRCNT, TXNCNT, TESTMEM |
+| `top` | Instantiate the above, handle the MISO tri-state and pin constraints |
 
-## 设计时要先回答的问题
+## Questions to answer before designing
 
-1. 整个逻辑跑在 SCLK 域，还是只在 SCLK 域做移位、其余放系统时钟域？各自的跨时钟域代价是什么？
-2. 系统时钟要比 SCLK 快多少，两级同步才稳妥？
-3. TESTMEM 用 BRAM 还是分布式 RAM？读延迟是几拍，GAP 字里放得下吗？
-4. 写数据暂存在哪里，容量够 64 个字吗？提交动作发生在哪个时钟域？
-5. CRC 用逐位串行更新，还是每个字并行更新？资源和时序如何权衡？
+1. Does the whole logic run in the SCLK domain, or only the shifting while the rest runs in the system
+   clock domain? What does each choice cost in clock-domain crossings?
+2. How much faster than SCLK must the system clock be for a two-flop synchronizer to be safe?
+3. Should TESTMEM be a BRAM or distributed RAM? How many cycles of read latency does it add, and does it
+   fit inside the GAP word?
+4. Where is the write data buffered, and is 64 words enough? In which clock domain does the commit happen?
+5. Should the CRC update bit-serially or one word at a time? What is the resource/timing trade-off?
 
-## 常见的坑
+## Common pitfalls
 
-- 第一个 MISO 位在 SCLK 第一个上升沿之前就要有效。
-- CS 提前拉高、中途断帧时，状态机和 CRC 累加器必须能恢复。
-- ISE 的 XST 对 SystemVerilog 支持有限，不要用 `logic`、`always_ff` 等。
-- 引脚约束（`.ucf`）和 I/O 电压要对照开发板原理图，不能假设能直连 Pi。
+- The first MISO bit must be valid before the first rising edge of SCLK.
+- If CS goes high early and cuts a frame short, the state machine and the CRC accumulator must recover.
+- ISE's XST has limited SystemVerilog support; avoid `logic`, `always_ff` and the like.
+- Pin constraints (`.ucf`) and I/O voltage must come from the board schematic; do not assume a direct
+  connection to the Pi is safe.
